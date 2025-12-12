@@ -1,0 +1,480 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Logic Mixer — simplified</title>
+<style>
+:root{
+  --bg:#f7fafc; --card:#ffffff; --muted:#6b7280; --accent:#0f172a;
+  --glass-w:92px; --glass-h:140px; --true-start:#e6ffff; --true-end:#c8f7ff;
+  --false-start:#ffd6d6; --false-end:#ff9b9b;
+}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0;background:var(--bg);font-family:Inter,system-ui,Roboto,Arial;color:var(--accent)}
+.app{max-width:1200px;margin:18px auto;padding:14px;display:grid;gap:12px}
+.header{display:flex;justify-content:space-between;align-items:center;gap:12px}
+.title{font-size:20px;margin:0}
+.subtitle{font-size:13px;color:var(--muted)}
+.controls{display:flex;gap:8px}
+button,select,input{font:inherit}
+button{padding:8px 10px;border-radius:8px;border:none;background:var(--accent);color:#fff;cursor:pointer}
+.muted{background:#fff;border:1px solid #e6eef8;color:var(--accent)}
+.board{display:grid;grid-template-columns:320px 1fr 320px;gap:12px;margin-top:6px}
+
+/* Panels */
+.panel{background:var(--card);padding:12px;border-radius:12px;box-shadow:0 4px 12px rgba(2,6,23,0.04)}
+.panel h3{margin:0 0 8px 0}
+
+/* variables area */
+.var-list{display:flex;flex-direction:column;gap:8px}
+.var-row{display:flex;gap:8px;align-items:center}
+.glass{width:var(--glass-w);height:var(--glass-h);border-radius:14px;position:relative;background:linear-gradient(180deg,#fff8,#fff);box-shadow:0 8px 18px rgba(2,6,23,0.06);border:1px solid rgba(2,6,23,0.06);
+  display:flex;flex-direction:column;align-items:center;justify-content:flex-end;padding-bottom:10px;cursor:pointer}
+.rim{position:absolute;top:8px;left:50%;transform:translateX(-50%);width:70%;height:10px;border-radius:999px;background:linear-gradient(180deg,#fff,#f3f4f8)}
+.liquid{width:86%;height:64%;border-radius:12px 12px 8px 8px;border:1px solid rgba(0,0,0,0.05);box-shadow:inset 0 -8px 12px rgba(255,255,255,0.35);transition:all .25s}
+.liquid[data-val="1"]{background:linear-gradient(180deg,var(--true-start),var(--true-end))}
+.liquid[data-val="0"]{background:linear-gradient(180deg,var(--false-start),var(--false-end))}
+.label{font-size:13px;color:var(--accent);margin-top:8px}
+
+/* equations */
+.eq-list{display:flex;flex-direction:column;gap:10px;max-height:60vh;overflow:auto}
+.eq{display:flex;flex-direction:column;gap:8px;padding:8px;border-radius:10px;border:1px solid #eef2f7;background:#fff}
+.token-row{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+.token{display:flex;gap:6px;align-items:center;padding:6px;border-radius:8px;border:1px solid #e6eef8;background:#f8fbff}
+.token select,input[type=checkbox]{margin-left:4px}
+.op-btn{padding:4px 6px;border-radius:8px;border:1px dashed #cbd5e1;background:transparent;cursor:pointer}
+.small{font-size:13px;color:var(--muted)}
+
+/* result / preview */
+.preview-row{display:flex;gap:8px;align-items:center}
+.resultGlass{display:flex;flex-direction:column;align-items:center;gap:6px}
+.resultGlass .glass{width:84px;height:120px}
+
+/* trace / truth table */
+.trace{background:#fbfdff;border:1px dashed #e6f0ff;padding:8px;border-radius:8px;font-size:13px;color:var(--muted);max-height:180px;overflow:auto}
+
+/* history */
+.history{display:flex;flex-direction:column;gap:8px;max-height:52vh;overflow:auto}
+
+.op-btn{
+  padding:4px 6px;
+  border-radius:8px;
+  border:1px solid #1f2937; /* dark border */
+  background:#1f2937;       /* dark background */
+  color:#fff;               /* white text/icons */
+  cursor:pointer;
+  font-weight:600;          /* makes + more readable */
+}
+
+.op-btn:hover{
+  background:#111827;
+  border-color:#111827;
+}
+
+
+
+/* responsive */
+@media(max-width:1000px){
+  .board{grid-template-columns:1fr; }
+  .header{flex-direction:column;align-items:flex-start;gap:6px}
+}
+</style>
+</head>
+<body>
+<div class="app">
+  <div class="header">
+    <div>
+      <h1 class="title">Logic Mixer — simpler</h1>
+      <div class="subtitle">Build expressions like ¬(p ∨ q) or p ∧ q ∧ r. Add operands with +. See truth table & trace (teaching mode).</div>
+    </div>
+    <div class="controls">
+      <button id="addEqBtn">+ New equation</button>
+      <button id="clearHistory" class="muted">Clear history</button>
+    </div>
+  </div>
+
+  <div class="board">
+    <!-- left: variables -->
+    <div class="panel">
+      <h3>Variables (Glasses)</h3>
+      <div style="margin-bottom:8px" class="small">Click a glass to set focused operand. Add new variables below.</div>
+      <div class="var-list" id="varList"></div>
+      <hr style="margin:10px 0">
+      <div style="display:flex;gap:6px;flex-wrap:wrap">
+        <input id="varName" placeholder="name (p, q...)" />
+        <select id="varVal"><option value="1">True</option><option value="0">False</option></select>
+        <button id="addVar">Add</button>
+      </div>
+    </div>
+
+    <!-- center: equations -->
+    <div class="panel">
+      <h3>Equations & Builders</h3>
+      <div style="display:flex;gap:8px;margin-bottom:8px">
+        <button id="evalAll">Evaluate all</button>
+        <button id="resetAll" class="muted">Reset builders</button>
+      </div>
+      <div class="eq-list" id="eqList"></div>
+    </div>
+
+    <!-- right: preview, trace, history -->
+    <div class="panel">
+      <h3>Preview & Help</h3>
+      <div class="small" id="help">Each equation shows: expression → result glass. Click "Trace" to view a truth table and step-by-step evaluation so you understand why result is T/F (matches classroom truth-table approach in your notes). :contentReference[oaicite:4]{index=4}</div>
+
+      <div style="margin-top:12px">
+        <div style="font-weight:700;margin-bottom:6px">History</div>
+        <div class="history" id="history"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+/* ------------------------
+   Data & helpers
+   ------------------------ */
+const vars = {}; // name -> '1' or '0'
+const eqList = document.getElementById('eqList');
+const varList = document.getElementById('varList');
+const historyEl = document.getElementById('history');
+let focusedOperand = null; // when user clicks a variable glass
+
+function renderVars(){
+  varList.innerHTML = '';
+  Object.keys(vars).forEach(name=>{
+    const v = vars[name];
+    const g = document.createElement('div');
+    g.className='glass'; g.dataset.name=name; g.dataset.val=v;
+    g.innerHTML = '<div class="rim"></div><div class="liquid" data-val="'+v+'"></div><div class="label">'+name+' ('+(v==='1'?'T':'F')+')</div>';
+    g.addEventListener('click', ()=> {
+      focusedOperand = name;
+      // highlight briefly
+      g.style.boxShadow = '0 8px 20px rgba(59,130,246,0.18)';
+      setTimeout(()=> g.style.boxShadow = '0 8px 18px rgba(2,6,23,0.06)', 350);
+    });
+    varList.appendChild(g);
+  });
+}
+
+function addVar(name,val){
+  if(!name) return alert('Enter name');
+  name = name.trim();
+  if(!/^[a-zA-Z]\w*$/.test(name)) return alert('Invalid name');
+  vars[name]= val;
+  renderVars();
+}
+
+document.getElementById('addVar').addEventListener('click', ()=>{
+  const n = document.getElementById('varName').value;
+  const v = document.getElementById('varVal').value;
+  addVar(n,v); document.getElementById('varName').value='';
+});
+
+// default p and q
+addVar('p','1'); addVar('q','0');
+
+/* ------------------------
+   Equation builder model
+   representation:
+   {id, tokens: [ {not:boolean, var: 'p' } , {connector:'∧', not:false, var:'q'} , ... ] }
+   ------------------------ */
+
+let eqId = 0;
+document.getElementById('addEqBtn').addEventListener('click', ()=> createEquation());
+function createEquation(){
+  const id = 'eq'+(++eqId);
+  const eq = { id, tokens: [ {not:false, var: Object.keys(vars)[0] || ''} ] }; // default single operand
+  const dom = buildEqDom(eq);
+  eqList.prepend(dom);
+  return eq;
+}
+
+function buildEqDom(eqModel){
+  const box = document.createElement('div'); box.className='eq'; box.dataset.id = eqModel.id;
+  // header row: editable token row
+  const tokenRow = document.createElement('div'); tokenRow.className='token-row';
+
+  function renderTokens(){
+    tokenRow.innerHTML='';
+    eqModel.tokens.forEach((tok, idx) => {
+      const wrap = document.createElement('div'); wrap.className='token';
+      // NOT checkbox
+      const notLabel = document.createElement('label'); notLabel.className='small';
+      notLabel.innerHTML = '<input type="checkbox" '+(tok.not?'checked':'')+'> ¬';
+      notLabel.querySelector('input').addEventListener('change', (e)=>{ tok.not = e.target.checked; });
+      wrap.appendChild(notLabel);
+      // variable select (or focused set)
+      const sel = document.createElement('select');
+      Object.keys(vars).forEach(n=> sel.add(new Option(n,n)));
+      sel.value = tok.var || '';
+      sel.addEventListener('change', ()=> { tok.var = sel.value; });
+      sel.addEventListener('focus', ()=> focusedOperand = null);
+      // clicking variable glass sets focusedOperand so we can place quickly
+      wrap.appendChild(sel);
+
+      // connector + add button (for all except last token)
+      if(idx < eqModel.tokens.length - 1){
+        // connector has been stored on the *next* token as connectorToPrev
+        const connSelect = document.createElement('select');
+        ['∧','∨','→','⊕','NAND','NOR','≡'].forEach(op => connSelect.add(new Option(op,op)));
+        connSelect.value = eqModel.tokens[idx+1].connectorToPrev || '∧';
+        connSelect.addEventListener('change', ()=> { eqModel.tokens[idx+1].connectorToPrev = connSelect.value; });
+        wrap.appendChild(connSelect);
+      } else {
+        // plus button to add another operand after this one
+        const plus = document.createElement('button'); plus.className='op-btn'; plus.textContent='+';
+        plus.title = 'Add operand to the right';
+        plus.addEventListener('click', ()=>{
+          const newTok = {not:false, var: Object.keys(vars)[0]||'', connectorToPrev: '∧'};
+          eqModel.tokens.push(newTok);
+          renderTokens();
+        });
+        wrap.appendChild(plus);
+      }
+
+      // remove token button (only if more than 1 token)
+      if(eqModel.tokens.length > 1){
+        const del = document.createElement('button'); del.className='op-btn'; del.textContent='🗑';
+        del.title='Remove this operand';
+        del.addEventListener('click', ()=>{
+          eqModel.tokens.splice(idx,1);
+          renderTokens();
+        });
+        wrap.appendChild(del);
+      }
+      tokenRow.appendChild(wrap);
+    });
+  }
+
+  renderTokens();
+  box.appendChild(tokenRow);
+
+  // actions: Evaluate | Trace
+  const actions = document.createElement('div'); actions.style.display='flex'; actions.style.gap='8px';
+  const evalBtn = document.createElement('button'); evalBtn.textContent='Evaluate';
+  const traceBtn = document.createElement('button'); traceBtn.textContent='Trace'; traceBtn.className='muted';
+  const removeEq = document.createElement('button'); removeEq.textContent='Remove'; removeEq.className='muted';
+
+  // result preview
+  const previewWrap = document.createElement('div'); previewWrap.style.display='flex'; previewWrap.style.gap='10px'; previewWrap.style.marginTop='8px';
+  const resGlass = makeResultGlass('—'); previewWrap.appendChild(resGlass);
+
+  actions.appendChild(evalBtn); actions.appendChild(traceBtn); actions.appendChild(removeEq);
+  box.appendChild(actions); box.appendChild(previewWrap);
+
+  // trace area
+  const traceArea = document.createElement('div'); traceArea.className='trace'; traceArea.style.display='none'; box.appendChild(traceArea);
+
+  // handlers
+  evalBtn.addEventListener('click', ()=>{
+    try{
+      ensureTokensHaveVars(eqModel);
+      const {value, traceHtml, usedVars} = evaluateEq(eqModel);
+      setResultGlass(resGlass, value);
+      // add to history
+      const text = renderExpression(eqModel) + ' = ' + (value==='1'?'T':'F');
+      const h = document.createElement('div'); h.style.display='flex'; h.style.justifyContent='space-between'; h.style.alignItems='center';
+      h.innerHTML = '<div style="font-size:13px">'+ text +'</div><div><button class="muted">Remove</button></div>';
+      h.querySelector('button').addEventListener('click', ()=> h.remove());
+      historyEl.prepend(h);
+      // hide trace by default, but prepare it
+      traceArea.innerHTML = traceHtml;
+      traceArea.style.display='none';
+    }catch(e){ alert(e.message); }
+  });
+
+  traceBtn.addEventListener('click', ()=>{
+    // toggle trace
+    traceArea.style.display = traceArea.style.display === 'none' ? 'block' : 'none';
+  });
+
+  removeEq.addEventListener('click', ()=> box.remove());
+
+  // allow dropping focused variable into selects
+  box.addEventListener('click', (ev)=> {
+    if(focusedOperand){
+      // find nearest select in tokenRow that is focused (or first empty)
+      const sel = tokenRow.querySelector('select');
+      if(sel){ sel.value = focusedOperand; // update model
+        // sync token model
+        const selIndex = Array.from(tokenRow.querySelectorAll('select')).indexOf(sel);
+        eqModel.tokens[0].var = sel.value;
+      }
+      focusedOperand = null;
+    }
+  });
+
+  return box;
+}
+
+/* ------------------------
+   Evaluation engine
+   ------------------------ */
+
+function ensureTokensHaveVars(eq){
+  eq.tokens.forEach((t,idx)=> {
+    if(!t.var) throw new Error('Select variable for operand #' + (idx+1));
+    if(!(t.var in vars)) throw new Error('Variable '+t.var+' not found (add it in left panel).');
+    // ensure connector default
+    if(idx>0 && !('connectorToPrev' in t)) t.connectorToPrev = '∧';
+  });
+}
+
+// compute boolean (using '1'/'0'), left-to-right evaluation
+function evaluateEq(eq){
+  // collect used variable names in order of appearance
+  const used = Array.from(new Set(eq.tokens.map(t=>t.var)));
+  const usedVars = used.slice();
+
+  // build truth table rows (cartesian product)
+  const rows = makeTruthTableRows(usedVars);
+  // For trace: compute value per row and show intermediate steps
+  const traceRows = rows.map(assign => {
+    // produce step-by-step evaluation strings
+    const stepValues = eq.tokens.map((tok, idx) => {
+      const raw = assign[tok.var] ? '1' : '0';
+      const val = tok.not ? negateRaw(raw) : raw;
+      return {name: tok.var, raw, val, not: tok.not};
+    });
+
+    // now evaluate left-to-right combining via connectors
+    let acc = stepValues[0].val;
+    const steps = [`${stepValues[0].not? '¬' : ''}${stepValues[0].name}=${acc}`];
+    for(let i=1;i<stepValues.length;i++){
+      const connector = eq.tokens[i].connectorToPrev || '∧';
+      const right = stepValues[i].val;
+      const res = applyConnector(acc, right, connector);
+      steps.push(`${connector} ${stepValues[i].not? '¬' : ''}${stepValues[i].name}=${right} → ${res}`);
+      acc = res;
+    }
+    return {assign, final: acc, steps};
+  });
+
+  // final value: when all variables fixed to current global values (single assignment)
+  const currentAssign = {};
+  Object.keys(vars).forEach(k=> currentAssign[k] = (vars[k]==='1'));
+  // evaluate on a single assignment matching the current variables (this is what "Evaluate" should produce)
+  // But more intuitive: evaluate expression using the stored variable values (vars)
+  const concreteVals = eq.tokens.map(tok => {
+    const raw = vars[tok.var] === '1' ? '1' : '0';
+    return tok.not ? negateRaw(raw) : raw;
+  });
+  let acc = concreteVals[0];
+  for(let i=1;i<concreteVals.length;i++){
+    const connector = eq.tokens[i].connectorToPrev || '∧';
+    acc = applyConnector(acc, concreteVals[i], connector);
+  }
+
+  // build human friendly traceHtml (truth table + sample steps)
+  let traceHtml = '<div style="font-weight:600;margin-bottom:6px">Truth table — variables: '+usedVars.join(', ')+'</div>';
+  traceHtml += '<table style="width:100%;border-collapse:collapse;font-size:13px"><thead><tr>';
+  usedVars.forEach(v => traceHtml += `<th style="text-align:left;padding:4px;border-bottom:1px solid #eef2f7">${v}</th>`);
+  traceHtml += '<th style="text-align:left;padding:4px;border-bottom:1px solid #eef2f7">Result</th></tr></thead><tbody>';
+  traceRows.forEach(r=>{
+    traceHtml += '<tr>';
+    usedVars.forEach(v => traceHtml += `<td style="padding:4px;border-bottom:1px solid #f3f6fb">${r.assign[v] ? 'T' : 'F'}</td>`);
+    traceHtml += `<td style="padding:4px;border-bottom:1px solid #f3f6fb">${r.final==='1' ? 'T' : 'F'}</td></tr>`;
+  });
+  traceHtml += '</tbody></table>';
+  // example steps for the real variables (with current values)
+  traceHtml += '<div style="margin-top:8px;font-weight:600">Step evaluation using current variables:</div><div style="font-size:13px;padding-top:6px">';
+  traceHtml += '<div class="small">Expression: '+ renderExpression(eq) +'</div>';
+  // compute step values for current variables
+  const curSteps = eq.tokens.map((tok,idx)=>{
+    const raw = vars[tok.var] === '1' ? '1' : '0';
+    const val = tok.not ? negateRaw(raw) : raw;
+    return `${tok.not? '¬':''}${tok.var}=${raw==='1'?'T':'F'} → ${val==='1'?'T':'F'}`;
+  });
+  traceHtml += '<div style="margin-top:6px">'+curSteps.join(' , ')+'</div>';
+  // show left-to-right combine
+  let left = (eq.tokens[0].not ? negateRaw(vars[eq.tokens[0].var]) : (vars[eq.tokens[0].var]==='1'?'1':'0'));
+  let combineHtml = '';
+  for(let i=1;i<eq.tokens.length;i++){
+    const c = eq.tokens[i].connectorToPrev || '∧';
+    const right = (eq.tokens[i].not ? negateRaw(vars[eq.tokens[i].var]) : (vars[eq.tokens[i].var]==='1'?'1':'0'));
+    const res = applyConnector(left,right,c);
+    combineHtml += `${left==='1'?'T':'F'} ${c} ${right==='1'?'T':'F'} → ${res==='1'?'T':'F'}<br>`;
+    left = res;
+  }
+  traceHtml += '<div style="margin-top:6px">'+combineHtml+'</div></div>';
+  return {value: acc, traceHtml, usedVars};
+}
+
+// helper raw (strings '1'/'0')
+function negateRaw(s){ return s==='1' ? '0' : '1'; }
+function applyConnector(a,b,op){
+  // a,b are '1'/'0' strings
+  const A = a === '1', B = b === '1';
+  let out = false;
+  switch(op){
+    case '∧': out = A && B; break;
+    case '∨': out = A || B; break;
+    case '→': out = (!A) || B; break;
+    case '⊕': out = (A ^ B); break;
+    case 'NAND': out = !(A && B); break;
+    case 'NOR': out = !(A || B); break;
+    case '≡': out = (A && B) || (!A && !B); break;
+    default: out = false;
+  }
+  return out ? '1' : '0';
+}
+
+// produce array of all assignments for given variables
+function makeTruthTableRows(usedVars){
+  const n = usedVars.length; const rows = [];
+  const combos = 1 << n;
+  for(let i=0;i<combos;i++){
+    const assign = {};
+    for(let j=0;j<n;j++){
+      assign[usedVars[j]] = !!(i & (1 << (n-1-j)));
+    }
+    rows.push(assign);
+  }
+  return rows;
+}
+
+/* ------------------------
+   UI utilities
+   ------------------------ */
+
+function makeResultGlass(init){
+  const w = document.createElement('div'); w.className='resultGlass';
+  const g = document.createElement('div'); g.className='glass';
+  g.style.width='84px'; g.style.height='120px';
+  g.innerHTML = '<div class="rim"></div><div class="liquid" data-val="'+(init==='1'?'1':'0')+'"></div><div class="label">'+(init==='1'?'T':(init==='0'?'F':'—'))+'</div>';
+  w.appendChild(g); return w;
+}
+function setResultGlass(wrapper, val){
+  const g = wrapper.querySelector('.glass');
+  const liq = g.querySelector('.liquid');
+  liq.dataset.val = val;
+  g.querySelector('.label').textContent = val==='1' ? 'T':'F';
+}
+function renderExpression(eq){
+  return eq.tokens.map((t,idx) => {
+    const s = (t.not? '¬':'') + t.var;
+    if(idx===0) return s;
+    return (t.connectorToPrev ? ' ' + t.connectorToPrev + ' ' + s : ' ' + s);
+  }).join('');
+}
+
+/* ------------------------
+   top-level buttons
+   ------------------------ */
+document.getElementById('evalAll').addEventListener('click', ()=>{
+  Array.from(eqList.children).forEach(eqDiv => {
+    const btn = eqDiv.querySelector('button'); // first button is Evaluate
+    if(btn) btn.click();
+  });
+});
+document.getElementById('resetAll').addEventListener('click', ()=> eqList.innerHTML='');
+document.getElementById('clearHistory').addEventListener('click', ()=> { if(confirm('Clear history?')) historyEl.innerHTML=''; });
+
+// create initial equation to show UI
+createEquation();
+
+</script>
+</body>
+</html>
